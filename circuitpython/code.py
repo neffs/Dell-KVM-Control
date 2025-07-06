@@ -1,12 +1,13 @@
 
 import board
 import digitalio
-import time
+#import time
 import rotaryio
 import busio
 import displayio
-import asyncio
-import supervisor
+import i2cdisplaybus
+#import asyncio
+#import supervisor
 
 import busio
 from adafruit_display_shapes.rect import Rect
@@ -14,13 +15,13 @@ import terminalio
 from adafruit_display_text.label import Label
 from adafruit_bitmap_font import bitmap_font
 
-from adafruit_debouncer import Debouncer
+from adafruit_debouncer import Debouncer 
 
 from dell_display import DellDisplay
 
-import usb_hid
-from adafruit_hid.keyboard import Keyboard
-from adafruit_hid.keycode import Keycode
+#import usb_hid
+#from adafruit_hid.keyboard import Keyboard
+#from adafruit_hid.keycode import Keycode
 
 
 import adafruit_displayio_sh1106
@@ -31,36 +32,42 @@ i2c_display = busio.I2C(board.GP15, board.GP14, frequency=500000)
 
 # INIT DISPLAY
 # Should be done first, because we can see errors there.
-display_bus = displayio.I2CDisplay(i2c_display, device_address=0x3C)
+display_bus = i2cdisplaybus.I2CDisplayBus(i2c_display, device_address=0x3C)
 
 WIDTH = 128
 HEIGHT = 64
 display = adafruit_displayio_sh1106.SH1106(display_bus, colstart=2 , width=WIDTH, height=HEIGHT, rotation=180)
 #display.brightness = 1.00
-
+display.auto_refresh=False
 # Make the display context
 default_display = displayio.Group()
 empty_display = displayio.Group()
-display.show(default_display)
+display.root_group = default_display
 
 BLACK = 0x000000
 WHITE = 0xFFFFFF
+GREY = 0x1F1F1F
+
 #font = bitmap_font.load_font("/font/Helvetica-Bold-16.bdf")
+from font_free_sans_48_latin1 import FONT as FONT_48
+from font_free_sans_24_latin1 import FONT as FONT_24
+from font_free_sans_14_latin1 import FONT as FONT_14
+
 font = terminalio.FONT
 
-volume_label = Label(font, text="Brightness", color=WHITE)
+volume_label = Label(FONT_14, text="Volume", color=WHITE)
 volume_label.anchor_point = (0.0, 0.0)
 volume_label.anchored_position = (0, 3)
-desk_label = Label(font, text="??? cm", color=WHITE)
-desk_label.anchor_point = (1.0, 1.0)
-desk_label.anchored_position = (127, 64)
+#desk_label = Label(font, text="??? cm", color=WHITE)
+#desk_label.anchor_point = (1.0, 1.0)
+#desk_label.anchored_position = (127, 64)
 
-input_label = Label(font, text="????", color=WHITE, scale=2)
+input_label = Label(FONT_48, text="??", color=WHITE)
 input_label.anchor_point = (1.0, 0.0)
 input_label.anchored_position = (127, 3)
 
 default_display.append(volume_label)
-default_display.append(desk_label)
+#default_display.append(desk_label)
 default_display.append(input_label)
 
 
@@ -72,26 +79,25 @@ def make_pin_reader(pin):
 
 
 # ENCODER
-
-encoder = rotaryio.IncrementalEncoder(board.GP2, board.GP3, divisor=4)
-encoder_button = Debouncer(make_pin_reader(board.GP4))
+encoder = rotaryio.IncrementalEncoder(board.GP18, board.GP19, divisor=2) #eigentlich 4
+encoder_button = Debouncer(make_pin_reader(board.GP20))
 last_position = None
 
 # BUTTONS
 
-button1 = Debouncer(make_pin_reader(board.GP5))
-button2 = Debouncer(make_pin_reader(board.GP6))
-button3 = Debouncer(make_pin_reader(board.GP7))
-button4 = Debouncer(make_pin_reader(board.GP8))
-button5 = Debouncer(make_pin_reader(board.GP9))
-button6 = Debouncer(make_pin_reader(board.GP10))
+#button1 = Debouncer(make_pin_reader(board.GP5))
+button1 = Debouncer(make_pin_reader(board.GP6))
+button2 = Debouncer(make_pin_reader(board.GP7))
+button3 = Debouncer(make_pin_reader(board.GP8))
+button4 = Debouncer(make_pin_reader(board.GP9))
+button5 = Debouncer(make_pin_reader(board.GP10))
 
-to_update = (encoder_button, button1, button2, button3, button4, button5, button6)
+to_update = (encoder_button, button2, button3, button4, button5, button1)
 
 # Set up a keyboard device.
-kbd = None
-if supervisor.runtime.usb_connected:
-    kbd = Keyboard(usb_hid.devices)
+#kbd = None
+#if supervisor.runtime.usb_connected:
+#    kbd = Keyboard(usb_hid.devices)
 
 # DELL DISPLAY
 
@@ -103,31 +109,52 @@ dell = DellDisplay(i2c_ddc)
 
 DESK_OFFSET = 3
 
+next_input = False
+
 def refresh_display_labels():
-    if dell.power == 5:
-        #turn off
-        display.show(empty_display)
-        display.auto_refresh=False
-        display.refresh()
+    global next_input
+    if dell.connected:
+        if dell.power == 5:
+            #turn off
+            display.root_group=empty_display
+            #display.auto_refresh=False
+            display.refresh()
+        else:
+            text = ""
+            input_mode = dell.input
+
+            if next_input:
+                text = dell.mode_to_text[next_input]
+                if input_mode == next_input:
+                    next_input = None
+            if input_mode in DellDisplay.mode_to_text:
+                text = dell.mode_to_text[input_mode]
+            
+            if dell.pbp_mode == DellDisplay.MODE_PBP:
+                if dell.pbp_input in dell.mode_to_text:
+                    text = text + "|" + DellDisplay.mode_to_text[dell.pbp_input]
+                
+            if input_mode != 0:
+                if "|" in text:
+                    input_label.font=FONT_24
+                else:
+                    input_label.font=FONT_48
+                input_label.text = text
+
+                display.root_group = default_display
+            display.refresh()
+            #display.
     else:
-        text = "??"
-        tmp = dell.input
-        if dell.input in DellDisplay.mode_to_text:
-            text = dell.mode_to_text[tmp]
-
-        if dell.pbp_mode == DellDisplay.MODE_PBP:
-            if dell.pbp_input in dell.mode_to_text:
-                text = text + "+" + DellDisplay.mode_to_text[dell.pbp_input]
-
-        input_label.text = text
-        display.show(default_display)
-        display.auto_refresh=True
-        #display.
+        display.root_group = default_display
+        input_label.text = "??"
+        #display.auto_refresh=False
+        display.refresh()
 
 
-
-
-dell.update_monitor_status()
+try:
+    dell.update_monitor_status()
+except Exception as e:
+    print("monitor update exception on startup")
 refresh_display_labels()
 
 i=0
@@ -135,9 +162,13 @@ i=0
 switched_pbp = False
 
 while True:
+    updated = False
     i+=1
     if i>=1000:
-        dell.update_monitor_status()
+        try:
+            dell.update_monitor_status()
+        except Exception as e:
+            print("monitor update exception on startup")
         refresh_display_labels()
         i=0
     
@@ -149,39 +180,53 @@ while True:
     if encoder_button.fell:
         print("fell")
     if button1.fell:
-        if button6.value:
+        if button5.value:
             dell.input = DellDisplay.USBC
         else:
             dell.pbp_mode = DellDisplay.MODE_PBP
             dell.pbp_input = DellDisplay.USBC
             switched_pbp = True
-    if button2.fell:
-        if button6.value:
+        next_input = DellDisplay.USBC
+        updated = True
+
+    if button3.fell:
+        if button5.value:
             dell.input = DellDisplay.DP1
         else:
             dell.pbp_mode = DellDisplay.MODE_PBP
             dell.pbp_input = DellDisplay.DP1
             switched_pbp = True
-    if button3.fell:
-        if button6.value:
+        next_input = DellDisplay.DP1
+        updated = True
+
+    if button4.fell:
+        if button5.value:
             dell.input = DellDisplay.HDMI1
         else:
             dell.pbp_mode = DellDisplay.MODE_PBP
             dell.pbp_input = DellDisplay.HDMI1
             switched_pbp = True
-    if button4.fell and kbd is not None:
-        kbd.press(Keycode.F13)
-    if button4.rose and kbd is not None:
-        kbd.release(Keycode.F13)
-    if button5.fell:
+        next_input = DellDisplay.HDMI1
+        updated = True
+
+    #if button4.fell and kbd is not None:
+    #    kbd.press(Keycode.F13)
+    #if button4.rose and kbd is not None:
+    #    kbd.release(Keycode.F13)
+    if button2.fell:
         dell.toggle_usb()
 
-    if button6.rose:
+    if button5.rose:
         if switched_pbp:
             switched_pbp = False
         elif dell.pbp_mode == DellDisplay.MODE_PBP:
+            next_input = dell.input
             dell.pbp_mode = DellDisplay.MODE_OFF
             print("PBP Switched off")
+        updated = True
+
+    if updated:
+        refresh_display_labels()
     
     position = encoder.position
     if last_position is None or position != last_position:
@@ -191,7 +236,7 @@ while True:
         if position >= 100:
             encoder.position = 100
             position = 100
-        volume_label.text = "Volume %d%%" % position
+        volume_label.text = "Volume\n%d%%" % position
     last_position = position
     
     #desk_data = None
